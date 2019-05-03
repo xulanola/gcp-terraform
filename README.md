@@ -1,4 +1,4 @@
-# eHarmony Terraform Infrastructure Code
+# companyX Terraform Infrastructure Code
 
 **References**
 - https://github.com/steinim/gcp-terraform-workshop
@@ -11,7 +11,7 @@
 - bats
 
 ## GCP Project Notes
-These are the projects that are allocated to the eHarmony environment
+These are the projects that are allocated to the companyX environment
 
 
 

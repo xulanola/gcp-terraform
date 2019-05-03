@@ -1,9 +1,9 @@
-eHarmony Terraform Infrastructure Code
+companyX Terraform Infrastructure Code
 
 Terraform is used to describe the desired state of the infrastructure, thus implementing Infrastructure as Code (IaC) approach.
 This readme file contains an example of deploying and managing kubernetes clusters to  (GCP) in a reliable and repeatable way.
 
-This project is allocated to the eHarmony environment.
+This project is allocated to the companyX environment.
 
 terraform-admin is the project with the service account that we will use for all the terraform operations.
 

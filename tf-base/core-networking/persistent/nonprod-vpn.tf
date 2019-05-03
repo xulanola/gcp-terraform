@@ -92,7 +92,7 @@ resource "google_compute_forwarding_rule" "nonprod_b_fr_udp_4500" {
 # ----------------------------------------------------------------------------------
 
 ###
-## eHarmony Datacenter VPN A Tunnel Definition
+## companyX Datacenter VPN A Tunnel Definition
 #
 resource "google_compute_vpn_tunnel" "nonprod_vpn_a_tunnel" {
   name          = "nonprod-shared-vpc-companyX-a-tunnel"
