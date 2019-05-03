@@ -1,0 +1,215 @@
+eHarmony Terraform Infrastructure Code
+
+Terraform is used to describe the desired state of the infrastructure, thus implementing Infrastructure as Code (IaC) approach.
+This readme file contains an example of deploying and managing kubernetes clusters to  (GCP) in a reliable and repeatable way.
+
+This project is allocated to the eHarmony environment.
+
+terraform-admin is the project with the service account that we will use for all the terraform operations.
+
+Note: 
+All shared VPC host projects need to be staged and manually derived in the the environment tfvars files.
+Reference the test.tfvars envars file for a reference
+
+Terraform
+* You will need to source the environment .env files into your shell be executing source envars/<environment>.envto put you in to the proper environment execution
+* Working locally it's assumed that you have your GOOGLE_APPLICATION_CREDENTIALS envar exported properly
+* All applications must leverage Terragrunt for locking
+* Leverage terraform validate before committing to make sure your code is good
+* Try to make sure anything that can be pulled into variable is pulled into it
+* Folder Layout
+    * Persistent = parts of the application stack that have persistence tied to them ie Database servers
+    * Ephemeral = parts of the application stack that can be blown away ie webservers / k8s compute nodes
+* If your code is not ready for terragrunt runs, name your terraform.tfvars to terraform.tfvars.skip
+* Using snakes _ vs kebab - : for variable names use snake but for values inside of the variable use kebab. 
+
+
+References
+
+provisioning basic infrastructure on Google Cloud Platform with Terraform.
+https://github.com/steinim/gcp-terraform-workshop
+
+Building Scalable and Resilient Web Applications on Google Cloud Platform
+https://cloud.google.com/solutions/scalable-and-resilient-apps
+
+The provider needs to be configured with the proper credentials before it can be used.
+https://www.terraform.io/docs/providers/google/index.html
+
+Terraform that provides extra tools for working with multiple Terraform modules
+https://github.com/gruntwork-io/terragrunt
+Managing multiple Kubernetes clusters on GkE with Terragrunt
+https://blog.osones.com/en/manage-multiple-kubernetes-clusters-on-gke-with-terragrunt.html 
+
+
+ 
+we use Terraform for provisioning basic infrastructure on the Google Cloud Platform (GCP), including projects, networking and deployment of java application on Compute Engine in an autoscaled and load balanced environment. 
+
+Tooling
+
+* Terraform
+* Terragrunt
+
+
+Before you begin
+1. Have a Cloud Platform account set up for your organization and that you are allowed to make organizational-level changes in the account.
+2 .Install Google Cloud SDK and Terraform
+brew update
+brew install Caskroom/cask/google-cloud-sdk
+brew install terraform
+Install Tools on Mac OS X
+With HomeBrew installed, you can do this to install the tools:
+cat <<-"BREWFILE" > Brewfile
+cask 'google-cloud-sdk'
+brew 'kubectl'
+brew 'terraform'
+BREWFILE
+brew bundle --verbose
+Organizing into Modules
+We’ll start by setting up this directory structure, and files referenced will use this:
+
+├── gke
+│   ├── cluster.tf
+│   ├── gcp.tf
+│   └── variables.tf
+├── k8s
+│   ├── k8s.tf
+│   ├── pods.tf
+│   ├── services.tf
+│   └── variables.tf
+└─── main.tf
+We can create this structure and empty files:
+mkdir terraform-gke
+cd terraform-gke
+mkdir gke k8s
+touch main.tf
+for f in cluster gcp variables; do touch gke/$f.tf; done
+for f in k8s pods services variables; do touch k8s/$f.tf; done
+Our top level, main.tf will reference two modules that we’ll create later. One module will create the GKE cluster, and the other module will use information from GKE to deploy software into the Kubernetes cluster.
+
+
+Cluster Specification
+This is the module that will create a Kubernetes cluster on Google Cloud using GKE resource.
+This first start by specifying all the variables this module will use in gke/variables.tf file:
+#####################################################################
+# Variables
+#####################################################################
+variable "project" {}
+variable "region" {}
+variable "username" {
+  default = "admin"
+}
+variable "password" {}
+We’ll need to specify a provider, which is Google Cloud in gke/gcp.tf file:
+#####################################################################
+# Google Cloud Platform
+#####################################################################
+provider "google" {
+  project = "${var.project}"
+  region  = "${var.region}"
+}
+With the variables specified and provider specified, we can now create our Kubernetes infrastructure. In Google Cloud this is one resource, but this encapsulates many components (managed instance group and template, persistence store, GCE instances for worker nodes, GKE master). This in done in gke/cluster.tf file:
+
+#####################################################################
+# GKE Cluster
+#####################################################################
+resource "google_container_cluster" "guestbook" {
+  name               = "guestbook"
+ zone               = "us-east1-b"
+  initial_node_count = 3
+
+  addons_config {
+    network_policy_config {
+      disabled = true
+    }
+  }
+
+  master_auth {
+    username = "${var.username}"
+    password = "${var.password}"
+  }
+
+  node_config {
+    oauth_scopes = [
+      "https://www.googleapis.com/auth/devstorage.read_only",
+      "https://www.googleapis.com/auth/logging.write",
+      "https://www.googleapis.com/auth/monitoring",
+      "https://www.googleapis.com/auth/service.management.readonly",
+      "https://www.googleapis.com/auth/servicecontrol",
+      "https://www.googleapis.com/auth/trace.append",
+      "https://www.googleapis.com/auth/compute",
+    ]
+  }
+}
+
+#####################################################################
+# Output for K8S
+#####################################################################
+output "client_certificate" {
+  value     = "${google_container_cluster.guestbook.master_auth.0.client_certificate}"
+  sensitive = true
+}
+
+output "client_key" {
+  value     = "${google_container_cluster.guestbook.master_auth.0.client_key}"
+  sensitive = true
+}
+
+output "cluster_ca_certificate" {
+  value     = "${google_container_cluster.guestbook.master_auth.0.cluster_ca_certificate}"
+  sensitive = true
+}
+
+output "host" {
+  value     = "${google_container_cluster.guestbook.endpoint}"
+  sensitive = true
+}
+This creates a 3 worker node cluster. The output variables will be used later when we deploy applications. They are marked sensitive to avoid printing out to standard output.
+Application Specification
+Kubernetes code repository has an example application called guestbook that uses Redis cluster to store information. This module is divided into four parts:
+* Variables used in this module
+* Kubernetes provider to connect to Kubernetes API
+* Pods using Replication Controller
+* Services creates permanent end point and connecting them to internal IP addresses as pods are added or removed.
+#####################################################################
+# Variables
+#####################################################################
+variable "username" {
+  default = "admin"
+}
+variable "password" {}
+variable "host" {}
+variable client_certificate {}
+variable client_key {}
+variable cluster_ca_certificate {}
+Our Kubernetes provider is in the k8s.tf file:
+provider "kubernetes" {
+  host     = "${var.host}"
+  username = "${var.username}"
+  password = "${var.password}"
+
+  client_certificate     = "${base64decode(var.client_certificate)}"
+  client_key             = "${base64decode(var.client_key)}"
+  cluster_ca_certificate = "${base64decode(var.cluster_ca_certificate)}"
+}
+And now we create our minimum unit of deployment, the Kubernetes pods using Kubernetes Replication Controller in pods.tf file. These will be 1 redis master pod, 2 redis slave pods, and 1 frontend pod. The images for these components are available from Google’s Container Registry.
+
+
+Launch the Application
+Before we start, we need to initialize some variables that the GCP provider requires, which is the target project and the desired region to create the cluster. We’ll use our default project configured with gcloud:
+export TF_VAR_project="$(gcloud config list \
+  --format 'value(core.project)'
+)"
+export TF_VAR_region="us-east1"
+Now we’ll need to specify the administrative account and a random password for the cluster:
+export TF_VAR_user="admin"
+export TF_VAR_password="m8XBWrg2zt8R8JoH"
+Now we’ll need to specify the administrative account and a random password for the cluster:
+export TF_VAR_user="admin"
+export TF_VAR_password="m8XBWrg2zt8R8JoH"
+With these setup, we can initialize our environment, which includes both downloading plugins required google cloud provider and kubernetes provider, as well as references to our modules.
+terraform init
+Now we can see what we want to create and then create it:
+terraform plan
+terraform apply
+
+

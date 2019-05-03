@@ -1,0 +1,73 @@
+Running Consul+Vault on Kubernetes
+
+This process will bring up a 3-member consul cluster and a two vault servers running in an HA configuration.
+A cluster of three consul servers provides an HA back-end for two vault servers.
+Consul is not exposed outside the cluster. Vault is exposed on a load-balancer service via https.
+
+* Services for each consul member and vault member
+* Deployments for each (because they require some minor separate configuration)
+* One service exposes the consul UI
+* One load-balancer service exposes the vault servers to outside world
+
+
+References
+
+Vault Commands (CLI)
+https://www.vaultproject.io/docs/commands/index.html
+
+vault-consul-on-kube
+
+https://github.com/drud/vault-consul-on-kube
+
+Consul starter
+https://github.com/kelseyhightower/consul-on-kubernetes
+
+Vault and Consul troubleshooting
+https://github.com/drud/vault-consul-on-kube/blob/master/troubleshooting.md#scenario-vault-is-sealed-on-both-vault-servers
+
+Scenario: Vault is sealed on both vault servers
+In this situation, both vault pods will show as unready in kubectl get po -l app=vault and vault status will show "Mode: sealed"
+Response: Unseal the vault servers
+$ kubectl -it vault-1<*> /bin/sh
+$ vault unseal
+Key (will be hidden): <unseal key>
+$ vault unseal
+Key (will be hidden): <key 2>
+Repeat same process on vault-2*
+This is done on the pod itself because you otherwise might be hitting the load balancer and landing at different vault servers each time you add an unseal key.
+Success indication
+If you have been successful, one of the vault pods will now show "ready" on kubectl get po -l app=vault, vault status using the external load balancer ip/dns should show active, and if you auth you should be able to access keys.
+Why this might happen
+When a vault server is recreated, it comes up sealed. Each server which may be destined for service must be manually unsealed by someone with the unseal keys. So any failure of nodes or containers can result in this problem.
+Basic useful skills, diagnostics, resources
+* Familiarity with kubectl "get" and "logs"
+* kubectl proxy and explore the cluster using http://localhost:8001
+* kubectl port-forward consul-X* 8500 and use the consul web ui at http://localhost:8500/ui
+* Know how to unseal and auth on the vault servers
+* kubectl exec -it consul-X* /bin/sh and use the consul command-line tool.
+* Using the Google Logs/Stackdriver logs UI to filter and review container logs
+* Consul outage recovery, consul snapshot, consul docs, vault docs
+Vault failover testing
+* Both vaults must be unsealed
+* Restart active vault pod with kubectl delete pod <vault-1*>
+* <vault-2*> should become leader "Mode: active"
+* Unseal <vault-1*> - vault status will find it in "Mode: standby"
+* Restart/kill <vault-2*> or kill the process
+* <vault-1*> will become active
+Note that if a vault is sealed, its "READY" in kubectl get po will be 1/2, meaning that although the logger container is ready, the vault container is not - it's not considered ready until unsealed.
+Response: Bring up a new set of consul servers using the same configuration file
+If your existing Kubernetes services and secrets (consul-config and vault-consul-key) remain in place, you can just use them. Otherwise, you'll need to recreate them from scratch If your services do not have the same IP addresses they did before, recovery will be more complex
+1. kubectl get service shows all the appropriate services, with IP addresses.
+2. kubectl get secret shows the consul-config, vault-consul-key, and vaulttls secrets
+Process:
+1. Bring up the consul servers with kubectl apply -f deployments/consul-1.yaml -f deployments/consul-2.yaml -f deployments/consul-3.yaml
+2. Watch the resulting logs using kubectl logs -f consul-1*
+3. If you see a leader elected, and you see familiar secret keys under Key/Value->Vault->Logical->-> then things are close to working.
+4. Check status on the vault servers and unseal them.
+Complete loss and rebuild with recovery using a consul snapshot
+In this scenario, all disks, deployments, and services have been lost, and we need to restore a snapshot to a brand-new environment.
+1. Follow the full README.md process to set up the clusters.
+2. Get the consul snapshot you need up to a consul server. 
+3. We'll use consul-1: uuencode fullsnap201612071509.snap fullsnap201612071509.snap | kubectl exec -it consul-1-3058537447-fnlt1 uudecode
+4. On consul-1* find the acl_master_token in /etc/consul/consul_config.json and use it to load the snapshot: consul snapshot restore -token=8F2383EF-5199-4ED8-B20C-EF34D23FF109 fullsnap201612071509.snap
+5. Unseal the vault servers.

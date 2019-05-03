@@ -1,0 +1,145 @@
+Maven is used to build the java code cloned from Github . we have integrated maven and github plugins on Jenkins for code cloning and build process.
+Docker file is used to build a image containing the complied code. The docker image is then pushed to Docker hub(Container registry)
+In addition to the app container, we will also run the containers for consul and vault, all these 3 containers will be run using docker compose file.
+Consul is used for service discovery, load balancing and dns http requests.
+We have to then validate and unseal the vault variables access from the docker containers
+Validate the accessibility of the built app
+
+References
+example-spring-boot-mvc
+https://github.com/bkielczewski/example-spring-boot-mvc
+
+
+jenkins-in-kubernetes
+https://github.com/eldada/jenkins-in-kubernetes
+
+Automate your pipeline
+https://dzone.com/articles/easily-automate-your-cicd-pipeline-with-jenkins-he
+
+CI/CD to Kubernetes using Jenkins and Helm
+https://github.com/eldada/jenkins-pipeline-kubernetes
+
+
+
+
+Prepare Your Applications
+Follow these guidelines when preparing your applications:
+* Package your applications in a Docker Image according to the Docker Best Practices.
+* To run the same Docker container in any of these environments: Development, Staging or Production, separate the processes and the configurations as follows:
+    * For Development: Create a default configuration.
+    * For Staging and Production: Create a non-default configuration using one or more:
+        * Configuration files that can be mounted into the container during runtime.
+        * Environment variables that are passed to the Docker container.
+1. Get code from Git
+    1. Developer pushes code to Git, which triggers a Jenkins build webhook.
+    2. Jenkins pulls the latest code changes.
+2. Run build and unit tests
+    1. Jenkins runs the build.
+    2. Application’s Docker image is created during the build.- Tests run against a running Docker container.
+3. Publish Docker image and Helm Chart
+    1. Application’s Docker image is pushed to the google registry.
+    2. Helm chart is packed and uploaded to the Helm repository.
+4. Deploy to Development
+    1. Application is deployed to the Kubernetes development cluster or namespace using the published Helm chart.
+    2. Tests run against the deployed application in Kubernetes development environment.
+5. Deploy to Staging
+    1. Application is deployed to Kubernetes staging cluster or namespace using the published Helm chart.
+
+
+def notifySlack(String buildStatus = 'STARTED') {
+    // Build status of null means success.
+    buildStatus = buildStatus ?: 'SUCCESS'
+
+    def color
+
+    if (buildStatus == 'STARTED') {
+        color = '#D4DADF'
+    } else if (buildStatus == 'SUCCESS') {
+        color = '#BDFFC3'
+    } else if (buildStatus == 'UNSTABLE') {
+        color = '#FFFE89'
+    } else {
+        color = '#FF9FA1'
+    }
+
+    def msg = "${buildStatus}: Deploying `${env.JOB_NAME}` to staging rev #${env.BUILD_NUMBER}:\n${env.BUILD_URL}"
+
+    slackSend(color: color, message: msg)
+}
+node {
+    try {
+        //notifySlack()
+        // build steps.
+        stage('Checkout'){
+            git branch: 'dev', changelog: true, credentialsId: 'aa2741d8-e00c-4530-8499-508c56269d3c', url: 'git@10.0.10.204:cloud-migration/notifications-service.git'
+        }
+
+        stage('Build'){
+            sh 'mvn clean package'
+        }
+
+        stage('Test'){
+          // This is where your unit testing execution goes
+        }
+
+        stage('Coverage Report'){
+          // This is where your code coverage / quality executions go if this has been applied to the project
+        }
+
+
+
+        stage('Docker Build'){
+             sh 'docker build -t notifications-service .'
+        }
+
+        stage('Push Docker Image to GCR'){
+            sh 'docker login -u _json_key --password-stdin https://gcr.io < /opt/docker-admin.json'
+            // @TODO pull service name into Environment Variable
+            sh 'docker tag notifications-service gcr.io/companyX-admin-ea022977/notifications-service:$BUILD_NUMBER'
+            sh 'docker push gcr.io/companyX-admin-ea022977/notifications-service:$BUILD_NUMBER'
+        }
+
+       stage('Deploy QA3') {
+
+sh 'gcloud auth activate-service-account --key-file=/opt/companyX-admin.json --project=companyX-admin-ea022977'
+            sh 'gcloud container clusters get-credentials notificationsmodk8s-temp-qa3 --zone us-west1-a --project gcp-qa3-0528'
+            sh 'helm upgrade notifications-service notifications-service --set image.tag=$BUILD_NUMBER'
+       }
+
+       stage('Deploy QA9') {
+            sh 'gcloud auth activate-service-account --key-file=/opt/companyX-admin.json --project=companyX-admin-ea022977'
+            sh 'gcloud container clusters get-credentials notificationsmodk8s-qa9 --zone us-west1-a --project gcp-qa9-0528'
+            sh 'helm upgrade notifications-service notifications-service --set image.tag=$BUILD_NUMBER'
+       }
+
+       stage('Acceptance Testing'){
+          // This is where your Acceptance tests goes here, if passes proceeds to prod deployment
+       }
+       stage('Deploy approval'){
+          input "Deploy to prod?"
+      }
+   
+       stage('Deploy PRD') {
+            sh 'gcloud auth activate-service-account --key-file=/opt/companyX-admin.json --project=companyX-admin-ea022977'
+            sh 'gcloud container clusters get-credentials notificationsmodk8s-prd --zone us-west1-a --project gcp-prod-gke-0525'
+            sh 'helm upgrade notifications-service notifications-service --set image.tag=$BUILD_NUMBER'
+       }
+       
+    } catch (e) {
+        currentBuild.result = 'FAILURE'
+        throw e
+    } finally {
+        //notifySlack(currentBuild.result)
+    }
+}
+
+Jenkins
+* The Jenkins pipeline(Jenkinsfile) is using calls to external cli tools such as docker, kubectl, curl and other shell commands. Some of these can be replaced with groovy code and functions or built in pipeline steps, but are implemented like this to demonstrate the simple use of these tools.
+Setup a Jenkins running with
+* Docker. Can build and push images
+* Kubectl. Kubernetes CLI that will link Jenkins with the Kubernetes cluster
+* Helm. Kubernetes package manager to simplify deployment of your Docker containers to Kubernetes
+Jenkins in Kubernetes
+* This project is used to build a Jenkins master that has the required tools (docker, kubectl and helm) already installed
+* You can deploy this Jenkins to Kubernetes using the helm chart in the same repository
+

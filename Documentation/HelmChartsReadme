@@ -1,0 +1,87 @@
+This document is to install minikube and helm in the local machine and then deploying applications into the GCR.
+
+TOOLING:
+Virtual Box
+Sandbox
+Minikube
+Helm
+
+PREREQUISITES:
+Install Virtual Box on the local machine and then run it for minikube to work.
+https://www.virtualbox.org/wiki/Downloads
+
+INSTALLING:
+
+To download minikube in your local machine.
+
+Install homebrew and then sandbox.
+
+    brew cask install sandbox
+
+To download minikube give the command
+
+    brew cask install minikube
+
+Have the kubernetes CLI in the machine
+
+    curl -Lo kubectl https://storage.googleapis.com/kubernetes-release/release/v1.9.0/bin/darwin/amd64/kubectl && chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+Start the minikube VM.
+
+    minikube start
+
+Check the status of VM.
+
+    minikube status
+Download the helm charts locally in the VM
+
+    brew install kubernetes-helm
+
+RUNNING IT:
+Clone the repo of the application that needs to be deployed. Start using the helm commands inside the repo directory.
+Start with giving helm init to run helm and the tiller.
+
+    helm init
+
+To create new charts for the applications, maintain the charts directory with the application name or you can use kebab ‘ - ‘  .
+
+    Ex: mpns or mpns-charts
+
+After giving the init command, proceed with helm create to create the charts. 
+
+    helm create mpns-charts
+
+It automatically generates the required files for it. 
+You need to make some changes sometimes in the values.yml file that is created when needed.
+Once created go ahead with helm install — name to deploy the charts into the minikube.
+use this url to connect to the cluster >>gcloud container clusters get-credentials notificationsmodk8s-qa3 --zone us-west1-a --project gcp-qa3-0528
+Then you  need to update  kubeconfig to make sure that they are pointing to the proper cluster   
+helm install -- name mpns-charts
+CHECKING:
+Check the charts that are created.
+ helm ls
+ Go to the minikube dashboard to look at the deployed charts in the dashboard.
+ minikube dashboard
+ SETTING UP SERVICE ACCOUNTS:
+In order to get access to the cloud platform, you need to setup service account.
+The owner will be able to give you access to deploy files into GCR.
+Install gcloud, this helps to create and delete kubernetes clusters. 
+Note: gcloud is generally included in the Google Cloud SDK.
+kubectl used to manage the cluster orchestration system used by the kubernetes engine. 
+gcloud components install kubectl 
+WORKING WITH gcloud:
+Give your project ID to save some time while working.
+ gcloud config set project [PROJECT_ID]
+Set the default configuration values in the gcloud command line tool.
+ gcloud config set compute/zone us-west1-a
+All the container clusters are created after setting the architecture.
+ACTIVATING SERVICE ACCOUNT:
+To activate the connection first we need to have the JSON key.
+gcloud auth activate-service-account --key-file=path-to--json-file —project=project-name
+Once the connection is established we should get the credentials.
+gcloud container clusters get-credentials cluster name --zone us-west1-a --project address
+This gives the connection with the required cluster.
+Once the connection is done then you get credentials to get into qa3, qa9, prod cluster.
+NOTE: As we are currently working in companyX-admin we just need to change the cluster names and then it will work. 
+Give a helm upgrade appname to update the helm charts and then it will work.
+helm upgrade mpns mpns --set image.tag=$BUILD_NUMBER 
